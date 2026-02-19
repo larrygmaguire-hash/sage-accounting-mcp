@@ -512,6 +512,191 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {},
       },
     },
+
+    // === OTHER PAYMENTS (Bank Payments / Expenses) ===
+    {
+      name: "sage_create_other_payment",
+      description: "Create a bank payment (expense) in Sage. Used for direct bank transactions like card payments and outgoing transfers.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          bank_account_id: {
+            type: "string",
+            description: "The Sage bank account ID (e.g. the Revolut account)",
+          },
+          date: {
+            type: "string",
+            description: "Payment date (YYYY-MM-DD)",
+          },
+          total_amount: {
+            type: "number",
+            description: "Total payment amount (positive number)",
+          },
+          tax_rate_id: {
+            type: "string",
+            description: "Sage tax rate ID (from sage_list_tax_rates)",
+          },
+          ledger_account_id: {
+            type: "string",
+            description: "Sage ledger account ID for the expense category",
+          },
+          contact_id: {
+            type: "string",
+            description: "Sage contact ID for the supplier (optional)",
+          },
+          reference: {
+            type: "string",
+            description: "Payment reference (e.g. Revolut transaction description)",
+          },
+          net_amount: {
+            type: "number",
+            description: "Net amount before tax (optional — Sage can calculate from total if tax_rate provided)",
+          },
+        },
+        required: ["bank_account_id", "date", "total_amount", "tax_rate_id", "ledger_account_id"],
+      },
+    },
+
+    // === OTHER RECEIPTS (Bank Receipts / Refunds) ===
+    {
+      name: "sage_create_other_receipt",
+      description: "Create a bank receipt (income/refund) in Sage. Used for card refunds, incoming transfers, and other non-invoice receipts.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          bank_account_id: {
+            type: "string",
+            description: "The Sage bank account ID",
+          },
+          date: {
+            type: "string",
+            description: "Receipt date (YYYY-MM-DD)",
+          },
+          total_amount: {
+            type: "number",
+            description: "Total receipt amount (positive number)",
+          },
+          tax_rate_id: {
+            type: "string",
+            description: "Sage tax rate ID",
+          },
+          ledger_account_id: {
+            type: "string",
+            description: "Sage ledger account ID for the income/receipt category",
+          },
+          contact_id: {
+            type: "string",
+            description: "Sage contact ID (optional)",
+          },
+          reference: {
+            type: "string",
+            description: "Receipt reference",
+          },
+          net_amount: {
+            type: "number",
+            description: "Net amount before tax (optional)",
+          },
+        },
+        required: ["bank_account_id", "date", "total_amount", "tax_rate_id", "ledger_account_id"],
+      },
+    },
+
+    // === PURCHASE INVOICES (Create) ===
+    {
+      name: "sage_create_purchase_invoice",
+      description: "Create a purchase invoice (bill) in Sage. Used for overseas/non-EU suppliers that require an invoice entry for Irish tax purposes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_id: {
+            type: "string",
+            description: "Supplier contact ID (required)",
+          },
+          date: {
+            type: "string",
+            description: "Invoice date (YYYY-MM-DD, default: today)",
+          },
+          due_date: {
+            type: "string",
+            description: "Payment due date (YYYY-MM-DD)",
+          },
+          reference: {
+            type: "string",
+            description: "Invoice reference (e.g. supplier invoice number or Revolut description)",
+          },
+          notes: {
+            type: "string",
+            description: "Notes for the invoice",
+          },
+          line_items: {
+            type: "array",
+            description: "Array of invoice line items",
+            items: {
+              type: "object",
+              properties: {
+                description: { type: "string" },
+                quantity: { type: "number" },
+                unit_price: { type: "number" },
+                tax_rate_id: { type: "string" },
+                ledger_account_id: { type: "string" },
+              },
+              required: ["description", "quantity", "unit_price"],
+            },
+          },
+        },
+        required: ["contact_id", "line_items"],
+      },
+    },
+
+    // === PURCHASE INVOICE PAYMENTS ===
+    {
+      name: "sage_create_purchase_invoice_payment",
+      description: "Create a payment against a purchase invoice in Sage. Links a bank payment to an existing purchase invoice to mark it as paid.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contact_id: {
+            type: "string",
+            description: "Supplier contact ID",
+          },
+          bank_account_id: {
+            type: "string",
+            description: "The Sage bank account ID the payment was made from",
+          },
+          date: {
+            type: "string",
+            description: "Payment date (YYYY-MM-DD)",
+          },
+          total_amount: {
+            type: "number",
+            description: "Total payment amount",
+          },
+          invoice_allocations: {
+            type: "array",
+            description: "Array of invoice allocations — which invoices this payment covers",
+            items: {
+              type: "object",
+              properties: {
+                invoice_id: {
+                  type: "string",
+                  description: "The Sage purchase invoice ID to allocate payment to",
+                },
+                amount: {
+                  type: "number",
+                  description: "Amount allocated to this invoice",
+                },
+              },
+              required: ["invoice_id", "amount"],
+            },
+          },
+          reference: {
+            type: "string",
+            description: "Payment reference",
+          },
+        },
+        required: ["contact_id", "bank_account_id", "date", "total_amount", "invoice_allocations"],
+      },
+    },
   ],
 }));
 
@@ -685,6 +870,91 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "sage_list_tax_rates":
         result = await sageRequest("/tax_rates");
         break;
+
+      // === OTHER PAYMENTS ===
+      case "sage_create_other_payment": {
+        const paymentBody = {
+          other_payment: {
+            bank_account_id: params.bank_account_id,
+            date: params.date,
+            reference: params.reference,
+            contact_id: params.contact_id,
+            payment_lines: [
+              {
+                ledger_account_id: params.ledger_account_id,
+                total_amount: params.total_amount,
+                net_amount: params.net_amount,
+                tax_rate_id: params.tax_rate_id,
+              },
+            ],
+          },
+        };
+        result = await sageRequest("/other_payments", "POST", paymentBody);
+        break;
+      }
+
+      // === OTHER RECEIPTS ===
+      case "sage_create_other_receipt": {
+        const receiptBody = {
+          other_receipt: {
+            bank_account_id: params.bank_account_id,
+            date: params.date,
+            reference: params.reference,
+            contact_id: params.contact_id,
+            payment_lines: [
+              {
+                ledger_account_id: params.ledger_account_id,
+                total_amount: params.total_amount,
+                net_amount: params.net_amount,
+                tax_rate_id: params.tax_rate_id,
+              },
+            ],
+          },
+        };
+        result = await sageRequest("/other_receipts", "POST", receiptBody);
+        break;
+      }
+
+      // === PURCHASE INVOICES (Create) ===
+      case "sage_create_purchase_invoice": {
+        const purchaseInvoiceBody = {
+          purchase_invoice: {
+            contact_id: params.contact_id,
+            date: params.date || new Date().toISOString().split("T")[0],
+            due_date: params.due_date,
+            reference: params.reference,
+            notes: params.notes,
+            invoice_lines: (params.line_items as Array<Record<string, unknown>>).map((item) => ({
+              description: item.description,
+              quantity: item.quantity,
+              unit_price: item.unit_price,
+              tax_rate_id: item.tax_rate_id,
+              ledger_account_id: item.ledger_account_id,
+            })),
+          },
+        };
+        result = await sageRequest("/purchase_invoices", "POST", purchaseInvoiceBody);
+        break;
+      }
+
+      // === PURCHASE INVOICE PAYMENTS ===
+      case "sage_create_purchase_invoice_payment": {
+        const paymentBody = {
+          contact_payment: {
+            contact_id: params.contact_id,
+            bank_account_id: params.bank_account_id,
+            date: params.date,
+            total_amount: params.total_amount,
+            reference: params.reference,
+            allocated_artefacts: (params.invoice_allocations as Array<Record<string, unknown>>).map((alloc) => ({
+              artefact_id: alloc.invoice_id,
+              amount: alloc.amount,
+            })),
+          },
+        };
+        result = await sageRequest("/contact_payments", "POST", paymentBody);
+        break;
+      }
 
       // === BUSINESS ===
       case "sage_get_business":
